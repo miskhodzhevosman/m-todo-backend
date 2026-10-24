@@ -4,7 +4,7 @@ set -Eeuo pipefail
 # Run as the repository owner; sudo is used only for system installation.
 ROOT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 if [[ "${1:-}" == "--help" ]]; then
-    printf 'Usage: [HEALTHCHECK_URL=http://127.0.0.1:8000/categories] ./deploy.sh\nBuild and deploy to /opt/m-todo-backend with a systemd service.\nRequires Arch Linux with systemd, Go 1.23+, sudo, and curl.\n'
+    printf 'Usage: [HEALTHCHECK_URL=http://127.0.0.1:8000/health] ./deploy.sh\nBuild and deploy to /opt/m-todo-backend with a systemd service.\nRequires Arch Linux with systemd, Go 1.23+, sudo, and curl.\n'
     exit 0
 fi
 [[ $# -eq 0 ]] || { printf 'Unknown argument. Use --help.\n' >&2; exit 1; }
@@ -67,6 +67,6 @@ sudo systemctl enable m-todo-backend.service
 sudo systemctl restart m-todo-backend.service
 
 curl --fail --silent --show-error --retry 10 --retry-delay 1 --retry-connrefused \
-    "${HEALTHCHECK_URL:-http://127.0.0.1:8000/categories}" >/dev/null
+    "${HEALTHCHECK_URL:-http://127.0.0.1:8000/health}" >/dev/null
 sudo systemctl is-active --quiet m-todo-backend.service
 printf 'Backend deployed. Config: /var/lib/m-todo-backend/.env\nLogs: sudo journalctl -u m-todo-backend -f\n'

@@ -20,7 +20,20 @@ func testHandler(t *testing.T) http.Handler {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	return newHandler(db, []string{"http://localhost:5173"})
+	h := newHandler(db, []string{"http://localhost:5173"})
+	u, err := createUser(db, "tester", "testpassword", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Exercise real session middleware for all existing CRUD cases.
+		_, err := db.Exec("INSERT OR REPLACE INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)", tokenHash("test-session"), u.ID, time.Now().Add(time.Hour).Unix())
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.AddCookie(&http.Cookie{Name: sessionCookie, Value: "test-session"})
+		h.ServeHTTP(w, r)
+	})
 }
 
 func request(t *testing.T, handler http.Handler, method, path, body string, status int, target any) *httptest.ResponseRecorder {
@@ -191,8 +204,10 @@ func TestLegacyDatabaseMigration(t *testing.T) {
 			t.Fatal(err)
 		}
 		var task todo
-		h := newHandler(db, nil)
-		request(t, h, "GET", "/todos/1", "", 200, &task)
+		task, err = scanTodo(db.QueryRow(todoSelect + " WHERE t.id=1"))
+		if err != nil {
+			t.Fatal(err)
+		}
 		db.Close()
 		if task.Title != "existing" || task.Urgency != "medium" || task.CategoryID != nil {
 			t.Fatalf("migration lost data or defaults: %+v", task)

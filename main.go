@@ -3,11 +3,15 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
+	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -28,10 +32,28 @@ func run() error {
 		return err
 	}
 	defer db.Close()
+	if len(os.Args) > 1 && os.Args[1] == "create-user" {
+		flags := flag.NewFlagSet("create-user", flag.ContinueOnError)
+		username := flags.String("username", "", "Username")
+		claim := flags.Bool("claim-legacy", false, "Assign previously unowned tasks and categories to this user")
+		if err := flags.Parse(os.Args[2:]); err != nil {
+			return err
+		}
+		password, err := io.ReadAll(io.LimitReader(os.Stdin, 1024))
+		if err != nil {
+			return err
+		}
+		u, err := createUser(db, *username, strings.TrimRight(string(password), "\r\n"), *claim)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Created user %s (id=%d)\n", u.Username, u.ID)
+		return nil
+	}
 
 	server := &http.Server{
 		Addr:              net.JoinHostPort(cfg.Host, cfg.Port),
-		Handler:           newHandler(db, cfg.CORSOrigins),
+		Handler:           newHandler(db, cfg.CORSOrigins, cfg.CookieSecure),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,

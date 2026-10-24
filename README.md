@@ -52,14 +52,14 @@ sudo pacman -Syu --needed go sudo curl
 
 Обновление: `git pull` и повторный запуск `./deploy.sh`. Если меняли адрес/порт
 API, передавайте URL проверки, например
-`HEALTHCHECK_URL=http://127.0.0.1:9000/categories ./deploy.sh`.
+`HEALTHCHECK_URL=http://127.0.0.1:9000/health ./deploy.sh`.
 
 ```sh
 sudoedit /var/lib/m-todo-backend/.env
 sudo systemctl restart m-todo-backend
 sudo systemctl status m-todo-backend
 sudo journalctl -u m-todo-backend -f
-curl --fail http://127.0.0.1:8000/categories
+curl --fail http://127.0.0.1:8000/health
 ```
 
 Для публикации фронтенда на том же сервере выполните `./deploy.sh` из репозитория
@@ -78,6 +78,7 @@ curl --fail http://127.0.0.1:8000/categories
 | `PORT` | `8000` | HTTP-порт |
 | `DB_PATH` | `./todos.db` | Путь к SQLite относительно рабочего каталога |
 | `CORS_ORIGINS` | `http://localhost:5173` | Разрешённые origins через запятую |
+| `COOKIE_SECURE` | `false` | `true` для HTTPS: cookie передаётся только по защищённому соединению |
 
 SQLite-файл создаётся автоматически, если отсутствует. Существующий `todos.db`
 совместим с Go-версией: при запуске создаются таблицы, добавляются недостающие
@@ -85,6 +86,44 @@ SQLite-файл создаётся автоматически, если отсу
 Каталог, указанный в `DB_PATH`, должен существовать.
 
 ## API
+
+### Пользователи и вход
+
+- `POST /auth/register` — регистрация: `{"username":"name","password":"password"}`.
+- `POST /auth/login` — вход с теми же полями.
+- `GET /auth/me` — текущий пользователь (`id`, `username`).
+- `POST /auth/logout` — завершение текущей сессии.
+- `GET /health` — общедоступная проверка работоспособности.
+
+Имя: 3–32 символа (латинские буквы, цифры, `_`, `.`, `-`), без учёта регистра.
+Пароль: 8–72 байта, хранится как bcrypt-хеш. Авторизация — через HttpOnly
+SameSite=Strict cookie; сессии живут 30 дней и хранятся в SQLite в виде хешей токенов.
+На HTTPS-сервере установите `COOKIE_SECURE=true` в серверном `.env`.
+
+Все маршруты задач и категорий требуют входа (`401` без действующей сессии).
+Каждый пользователь видит и меняет только свои записи. Имена категорий уникальны
+внутри аккаунта. Регистрация не предоставляет доступ к старым общим данным.
+
+Создание пользователя администратором (пароль передаётся через stdin):
+
+```sh
+sudo -u m-todo-backend sh -c 'cd /var/lib/m-todo-backend && /opt/m-todo-backend/m-todo-backend create-user --username name --claim-legacy'
+```
+
+Введите пароль и завершите ввод Ctrl+D. Флаг `--claim-legacy` присваивает этому
+пользователю задачи и категории старой версии, у которых ещё нет владельца.
+Для остальных пользователей этот флаг не нужен. Перед обновлением рекомендуется
+сохранить резервную копию SQLite. Миграция сохраняет существующие задачи и связи.
+
+### Задачи и категории
+
+Перед curl-примерами войдите и сохраните cookie:
+
+```sh
+curl -c cookies.txt http://127.0.0.1:8000/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"name","password":"password"}'
+```
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
@@ -107,6 +146,7 @@ SQLite-файл создаётся автоматически, если отсу
 
 ```sh
 curl -X POST http://127.0.0.1:8000/categories \
+  -b cookies.txt \
   -H 'Content-Type: application/json' \
   -d '{"name":"Работа","color":"#6366f1"}'
 ```
@@ -115,6 +155,7 @@ curl -X POST http://127.0.0.1:8000/categories \
 
 ```sh
 curl -X POST http://127.0.0.1:8000/todos \
+  -b cookies.txt \
   -H 'Content-Type: application/json' \
   -d '{"title":"Подготовить отчёт","urgency":"high","category_id":1,"due_at":"2026-12-01T18:00:00+03:00"}'
 ```

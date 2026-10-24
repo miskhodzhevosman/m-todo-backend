@@ -27,6 +27,11 @@ func openDatabase(path string) (*sql.DB, error) {
 }
 
 func migrate(db *sql.DB) error {
+	// Rebuild the old globally-unique categories table without rewriting todo FKs.
+	if _, err := db.Exec("PRAGMA foreign_keys = OFF"); err != nil {
+		return err
+	}
+	defer db.Exec("PRAGMA foreign_keys = ON")
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -91,7 +96,63 @@ func migrate(db *sql.DB) error {
 	`); err != nil {
 		return err
 	}
+	if err := migrateUsers(tx); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+func migrateUsers(tx *sql.Tx) error {
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+		password_hash TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+	);
+	CREATE TABLE IF NOT EXISTS sessions (
+		token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		expires_at INTEGER NOT NULL
+	);`); err != nil {
+		return err
+	}
+	for _, table := range []string{"categories", "todos"} {
+		rows, err := tx.Query("SELECT name FROM pragma_table_info(?)", table)
+		if err != nil {
+			return err
+		}
+		found := false
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				rows.Close()
+				return err
+			}
+			found = found || name == "user_id"
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if found {
+			continue
+		}
+		if table == "categories" {
+			_, err = tx.Exec(`CREATE TABLE categories_owned (
+				id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, color TEXT NOT NULL DEFAULT '#6366f1',
+				created_at TEXT NOT NULL DEFAULT (datetime('now')), user_id INTEGER REFERENCES users(id),
+				UNIQUE(user_id, name)
+			); INSERT INTO categories_owned (id,name,color,created_at) SELECT id,name,color,created_at FROM categories;
+			DROP TABLE categories; ALTER TABLE categories_owned RENAME TO categories;`)
+		} else {
+			_, err = tx.Exec("ALTER TABLE todos ADD COLUMN user_id INTEGER REFERENCES users(id)")
+		}
+		if err != nil {
+			return err
+		}
+	}
+	_, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_todos_user ON todos(user_id);
+		CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id);
+		CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);`)
+	return err
 }
 
 type category struct {

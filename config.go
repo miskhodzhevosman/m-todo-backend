@@ -11,10 +11,11 @@ import (
 )
 
 type config struct {
-	Host        string
-	Port        string
-	DBPath      string
-	CORSOrigins []string
+	Host         string
+	Port         string
+	DBPath       string
+	CORSOrigins  []string
+	CookieSecure bool
 }
 
 func loadConfig() (config, error) {
@@ -29,6 +30,10 @@ func loadConfig() (config, error) {
 	port, err := strconv.Atoi(cfg.Port)
 	if err != nil || port < 1 || port > 65535 {
 		return config{}, errors.New("PORT must be between 1 and 65535")
+	}
+	cfg.CookieSecure, err = strconv.ParseBool(envOrDefault("COOKIE_SECURE", "false"))
+	if err != nil {
+		return config{}, errors.New("COOKIE_SECURE must be true or false")
 	}
 	for _, origin := range strings.Split(envOrDefault("CORS_ORIGINS", "http://localhost:5173"), ",") {
 		if origin = strings.TrimSpace(origin); origin != "" {

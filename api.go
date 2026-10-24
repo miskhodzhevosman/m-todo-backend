@@ -14,11 +14,22 @@ import (
 	"modernc.org/sqlite"
 )
 
-type api struct{ db *sql.DB }
+type api struct {
+	db            *sql.DB
+	secureCookies bool
+}
 
-func newHandler(db *sql.DB, origins []string) http.Handler {
+func newHandler(db *sql.DB, origins []string, secure ...bool) http.Handler {
 	a := &api{db: db}
+	if len(secure) > 0 {
+		a.secureCookies = secure[0]
+	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
+	mux.HandleFunc("POST /auth/register", a.register)
+	mux.HandleFunc("POST /auth/login", a.login)
+	mux.HandleFunc("POST /auth/logout", a.logout)
+	mux.HandleFunc("GET /auth/me", a.me)
 	mux.HandleFunc("GET /categories", a.listCategories)
 	mux.HandleFunc("POST /categories", a.createCategory)
 	mux.HandleFunc("PATCH /categories/{id}", a.updateCategory)
@@ -28,7 +39,7 @@ func newHandler(db *sql.DB, origins []string) http.Handler {
 	mux.HandleFunc("GET /todos/{id}", a.getTodo)
 	mux.HandleFunc("PATCH /todos/{id}", a.updateTodo)
 	mux.HandleFunc("DELETE /todos/{id}", a.deleteTodo)
-	return cors(mux, origins)
+	return cors(a.authenticate(mux, origins), origins)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -59,7 +70,7 @@ func pathID(r *http.Request) (int64, error) {
 }
 
 func (a *api) listCategories(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.QueryContext(r.Context(), "SELECT id, name, color, created_at FROM categories ORDER BY name COLLATE NOCASE")
+	rows, err := a.db.QueryContext(r.Context(), "SELECT id, name, color, created_at FROM categories WHERE user_id = ? ORDER BY name COLLATE NOCASE", currentUser(r).ID)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -114,6 +125,9 @@ func (a *api) mutate(w http.ResponseWriter, r *http.Request, entity string, crea
 		writeError(w, err)
 		return
 	}
+	if create {
+		data["user_id"] = currentUser(r).ID
+	}
 	tx, err := a.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeError(w, err)
@@ -122,7 +136,7 @@ func (a *api) mutate(w http.ResponseWriter, r *http.Request, entity string, crea
 	defer tx.Rollback()
 	if categoryID, ok := data["category_id"]; ok && categoryID != nil {
 		var exists int
-		err := tx.QueryRowContext(r.Context(), "SELECT 1 FROM categories WHERE id = ?", categoryID).Scan(&exists)
+		err := tx.QueryRowContext(r.Context(), "SELECT 1 FROM categories WHERE id = ? AND user_id = ?", categoryID, currentUser(r).ID).Scan(&exists)
 		if errors.Is(err, sql.ErrNoRows) {
 			err = &apiError{http.StatusBadRequest, "Category not found"}
 		}
@@ -148,8 +162,8 @@ func (a *api) mutate(w http.ResponseWriter, r *http.Request, entity string, crea
 	}
 	query := "INSERT INTO " + entity + " (" + strings.Join(fields, ", ") + ") VALUES (" + strings.Join(clauses, ", ") + ")"
 	if !create {
-		query = "UPDATE " + entity + " SET " + strings.Join(clauses, ", ") + " WHERE id = ?"
-		values = append(values, id)
+		query = "UPDATE " + entity + " SET " + strings.Join(clauses, ", ") + " WHERE id = ? AND user_id = ?"
+		values = append(values, id, currentUser(r).ID)
 	}
 	result, err := tx.ExecContext(r.Context(), query, values...)
 	if err != nil {
@@ -214,7 +228,7 @@ func (a *api) delete(w http.ResponseWriter, r *http.Request, entity string) {
 		writeError(w, err)
 		return
 	}
-	result, err := a.db.ExecContext(r.Context(), "DELETE FROM "+entity+" WHERE id = ?", id)
+	result, err := a.db.ExecContext(r.Context(), "DELETE FROM "+entity+" WHERE id = ? AND user_id = ?", id, currentUser(r).ID)
 	if err == nil {
 		var count int64
 		count, err = result.RowsAffected()
@@ -235,7 +249,7 @@ func (a *api) getTodo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	item, err := scanTodo(a.db.QueryRowContext(r.Context(), todoSelect+" WHERE t.id = ?", id))
+	item, err := scanTodo(a.db.QueryRowContext(r.Context(), todoSelect+" WHERE t.id = ? AND t.user_id = ?", id, currentUser(r).ID))
 	if errors.Is(err, sql.ErrNoRows) {
 		err = notFound("todos")
 	}
@@ -247,7 +261,7 @@ func (a *api) getTodo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) listTodos(w http.ResponseWriter, r *http.Request) {
-	where, values := []string{}, []any{}
+	where, values := []string{"t.user_id = ?"}, []any{currentUser(r).ID}
 	params := r.URL.Query()
 	for _, field := range []string{"completed", "urgency", "category_id", "overdue"} {
 		if !params.Has(field) {

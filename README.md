@@ -22,6 +22,44 @@ go build -o bin/m-todo-backend .
 ./bin/m-todo-backend
 ```
 
+## Развёртывание на Linux (Ubuntu/Debian + systemd)
+
+На сервере нужны Go 1.23+, `sudo` и `curl`. Запускайте скрипт из клонированной
+репозитории от обычного пользователя с правами sudo:
+
+```sh
+./deploy.sh
+```
+
+Скрипт запускает тесты, собирает бинарник без CGO, устанавливает `sqlite3` через
+apt и создаёт systemd-сервис `m-todo-backend` с автозапуском и перезапуском при
+сбое. API по умолчанию слушает `127.0.0.1:8000`; фронтенд публикует его через Nginx.
+
+- Бинарник: `/opt/m-todo-backend/m-todo-backend`.
+- Конфигурация: `/var/lib/m-todo-backend/.env` — при первом запуске копируется
+  из `.env.example`. Для сервера редактируйте именно этот файл.
+- SQLite: `/var/lib/m-todo-backend/todos.db`. При первом развёртывании имеющийся
+  `todos.db` из репозитории переносится SQLite backup API. При повторном запуске
+  скрипта серверная база и конфигурация сохраняются.
+- Сервис работает от пользователя `m-todo-backend`, запись разрешена только
+  в `/var/lib/m-todo-backend`; используйте этот каталог для `DB_PATH`.
+
+Обновление: `git pull` и повторный запуск `./deploy.sh`. Если меняли адрес/порт
+API, передавайте URL проверки, например
+`HEALTHCHECK_URL=http://127.0.0.1:9000/categories ./deploy.sh`.
+
+```sh
+sudoedit /var/lib/m-todo-backend/.env
+sudo systemctl restart m-todo-backend
+sudo systemctl status m-todo-backend
+sudo journalctl -u m-todo-backend -f
+curl --fail http://127.0.0.1:8000/categories
+```
+
+Для публикации фронтенда на том же сервере выполните `./deploy.sh` из репозитория
+`m-todo-frontend`. При изменении порта API передайте фронтенд-скрипту соответствующий
+`BACKEND_URL`.
+
 ## Конфигурация
 
 `.env` загружается автоматически при запуске. Переменные окружения имеют

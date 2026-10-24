@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Go build artifacts and local SQLite databases
+/bin/
+/m-todo-backend
+*.test
+*.out
+*.db
+*.db-journal
+*.db-shm
+*.db-wal

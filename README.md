@@ -22,9 +22,15 @@ go build -o bin/m-todo-backend .
 ./bin/m-todo-backend
 ```
 
-## Развёртывание на Linux (Ubuntu/Debian + systemd)
+## Развёртывание на Arch Linux (systemd)
 
-На сервере нужны Go 1.23+, `sudo` и `curl`. Запускайте скрипт из клонированной
+Подготовьте сервер (полное обновление Arch и установка зависимостей):
+
+```sh
+sudo pacman -Syu --needed go sudo curl
+```
+
+Нужны Go 1.23+ и работающий systemd. Запускайте скрипт из клонированной
 репозитории от обычного пользователя с правами sudo:
 
 ```sh
@@ -32,7 +38,7 @@ go build -o bin/m-todo-backend .
 ```
 
 Скрипт запускает тесты, собирает бинарник без CGO, устанавливает `sqlite3` через
-apt и создаёт systemd-сервис `m-todo-backend` с автозапуском и перезапуском при
+`pacman` (пакет `sqlite`) и создаёт systemd-сервис `m-todo-backend` с автозапуском и перезапуском при
 сбое. API по умолчанию слушает `127.0.0.1:8000`; фронтенд публикует его через Nginx.
 
 - Бинарник: `/opt/m-todo-backend/m-todo-backend`.

@@ -4,11 +4,11 @@ set -Eeuo pipefail
 # Run as the repository owner; sudo is used only for system installation.
 ROOT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 if [[ "${1:-}" == "--help" ]]; then
-    printf 'Usage: [HEALTHCHECK_URL=http://127.0.0.1:8000/categories] ./deploy.sh\nBuild and deploy to /opt/m-todo-backend with a systemd service.\nRequires Go 1.23+, sudo, and Debian/Ubuntu with systemd.\n'
+    printf 'Usage: [HEALTHCHECK_URL=http://127.0.0.1:8000/categories] ./deploy.sh\nBuild and deploy to /opt/m-todo-backend with a systemd service.\nRequires Arch Linux with systemd, Go 1.23+, sudo, and curl.\n'
     exit 0
 fi
 [[ $# -eq 0 ]] || { printf 'Unknown argument. Use --help.\n' >&2; exit 1; }
-for command in go sudo systemctl apt-get curl; do
+for command in go sudo systemctl pacman curl; do
     command -v "$command" >/dev/null || { printf 'Required command: %s\n' "$command" >&2; exit 1; }
 done
 sudo -v
@@ -18,10 +18,9 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 go -C "$ROOT_DIR" test ./...
 CGO_ENABLED=0 go -C "$ROOT_DIR" build -trimpath -o "$BUILD_DIR/m-todo-backend" .
 
-sudo apt-get update
-sudo apt-get install -y sqlite3
+sudo pacman -S --needed --noconfirm sqlite
 if ! id m-todo-backend >/dev/null 2>&1; then
-    sudo useradd --system --user-group --home-dir /var/lib/m-todo-backend --shell /usr/sbin/nologin m-todo-backend
+    sudo useradd --system --user-group --home-dir /var/lib/m-todo-backend --shell /usr/bin/nologin m-todo-backend
 fi
 sudo install -d -m 0755 /opt/m-todo-backend
 sudo install -d -o m-todo-backend -g m-todo-backend -m 0750 /var/lib/m-todo-backend

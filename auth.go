@@ -46,7 +46,7 @@ func (a *api) authenticate(next http.Handler, origins []string) http.Handler {
 				}
 			}
 		}
-		if r.URL.Path == "/health" || r.URL.Path == "/auth/login" || r.URL.Path == "/auth/register" {
+		if r.URL.Path == "/health" || r.URL.Path == "/auth/login" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -118,20 +118,6 @@ func createUser(db *sql.DB, username, password string, claimLegacy bool) (user, 
 		}
 	}
 	return user{ID: id, Username: username}, tx.Commit()
-}
-
-func (a *api) register(w http.ResponseWriter, r *http.Request) {
-	name, password, err := credentials(w, r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	u, err := createUser(a.db, name, password, false)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	a.startSession(w, r, u, http.StatusCreated)
 }
 
 func (a *api) login(w http.ResponseWriter, r *http.Request) {

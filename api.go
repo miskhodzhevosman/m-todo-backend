@@ -26,7 +26,6 @@ func newHandler(db *sql.DB, origins []string, secure ...bool) http.Handler {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
-	mux.HandleFunc("POST /auth/register", a.register)
 	mux.HandleFunc("POST /auth/login", a.login)
 	mux.HandleFunc("POST /auth/logout", a.logout)
 	mux.HandleFunc("GET /auth/me", a.me)

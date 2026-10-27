@@ -22,8 +22,11 @@ func TestAuthenticationAndIsolation(t *testing.T) {
 	h := newHandler(db, nil, true)
 	request(t, h, "GET", "/todos", "", 401, nil)
 	request(t, h, "GET", "/health", "", 200, nil)
-	register := request(t, h, "POST", "/auth/register", `{"username":"alice","password":"password123"}`, 201, nil)
-	cookie := register.Result().Cookies()[0]
+	if _, err := createUser(db, "alice", "password123", false); err != nil {
+		t.Fatal(err)
+	}
+	loginResponse := request(t, h, "POST", "/auth/login", `{"username":"alice","password":"password123"}`, 200, nil)
+	cookie := loginResponse.Result().Cookies()[0]
 	if !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteStrictMode {
 		t.Fatal("session cookie is not protected")
 	}
@@ -34,13 +37,20 @@ func TestAuthenticationAndIsolation(t *testing.T) {
 		t.Fatal(me)
 	}
 	request(t, h, "POST", "/auth/login", `{"username":"alice","password":"wrong"}`, 401, nil)
-	request(t, h, "POST", "/auth/register", `{"username":"ALICE","password":"password123"}`, 409, nil)
-	request(t, h, "POST", "/auth/register", `{"username":"short","password":"123"}`, 422, nil)
+	request(t, h, "POST", "/auth/register", `{"username":"unwanted","password":"password123"}`, 401, nil)
+	request(t, alice, "POST", "/auth/register", `{"username":"unwanted","password":"password123"}`, 404, nil)
+	var count int
+	if err := db.QueryRow("SELECT count(*) FROM users").Scan(&count); err != nil || count != 1 {
+		t.Fatal("registration created a user")
+	}
 	var cat category
 	var task todo
 	request(t, alice, "POST", "/categories", `{"name":"Private"}`, 201, &cat)
 	request(t, alice, "POST", "/todos", fmt.Sprintf(`{"title":"secret","category_id":%d}`, cat.ID), 201, &task)
-	bobResponse := request(t, h, "POST", "/auth/register", `{"username":"bob","password":"password123"}`, 201, nil)
+	if _, err := createUser(db, "bob", "password123", false); err != nil {
+		t.Fatal(err)
+	}
+	bobResponse := request(t, h, "POST", "/auth/login", `{"username":"bob","password":"password123"}`, 200, nil)
 	bob := sessionHandler(h, bobResponse.Result().Cookies()[0])
 	var todos []todo
 	var categories []category
@@ -92,7 +102,7 @@ func TestLegacyOwnershipAndMigration(t *testing.T) {
 	}
 	var owner *int64
 	if err = db.QueryRow("SELECT user_id FROM todos").Scan(&owner); err != nil || owner != nil {
-		t.Fatal("public registration claimed legacy data")
+		t.Fatal("user creation without claim-legacy assigned legacy data")
 	}
 	u, err := createUser(db, "owner", "password123", true)
 	if err != nil {
